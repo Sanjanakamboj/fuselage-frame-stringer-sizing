@@ -79,6 +79,28 @@ factor as a modeling assumption -- not inelastic column behavior, not
 lateral-torsional or flexural-torsional buckling, and not a certification
 allowable.
 
+Milestone 5 scope
+------------------
+Milestone 5 adds an explicitly illustrative empirical crippling screen.
+Unlike Milestones 3-4's ideal elastic buckling equations (derived from
+first-principles eigenvalue theory), crippling correlations are empirical,
+configuration-dependent curve fits to test data -- they are labeled
+**illustrative preliminary crippling screen** throughout, never presented
+as a sourced handbook (e.g. MMPDS) or certification value.
+
+1. an explicit, visible crippling correlation (alpha, exponent -- never
+   hardcoded inside the formula) and a yield cap on the raw prediction
+2. a conservative, load-independent section-level b/t geometry driver
+   reused directly from the Milestone 3 plate-element mappings
+3. an axial-average crippling margin (P_crippling/P_comp - 1) and a
+   peak-compression margin (reusing the existing built-up normal-stress
+   extremes -- no new stress theory), kept separately visible
+4. a section-level crippling assessment with a computed governing mode
+5. a `StructuralStatus` integrating yield, local buckling, Euler,
+   amplified yield, and crippling side by side -- their margins are never
+   mathematically blended; the reported "governing margin" is only the
+   minimum of the independently computed preliminary margins
+
 This is a beam-section model, NOT a shell/frame finite-element model. It uses
 elementary (Euler-Bernoulli) beam theory only.
 
@@ -129,4 +151,6 @@ __all__ = [
     "local_buckling",
     "column_buckling",
     "beam_column",
+    "crippling",
+    "structural_status",
 ]

@@ -135,6 +135,45 @@ fastener/joint effects, fatigue, damage tolerance, certification
 knockdowns, multi-load-case sizing search, mass optimization, and final
 portfolio figures.
 
+## Milestone 5 scope
+
+**Milestone 5 adds an explicitly illustrative empirical crippling screen.
+Unlike Milestones 3-4's ideal elastic buckling equations (derived from
+first-principles eigenvalue theory), crippling correlations are empirical,
+configuration-dependent curve fits to test data -- every result here is
+labeled an "illustrative preliminary crippling screen," never a sourced
+handbook (e.g. MMPDS) or certification value.**
+
+Milestone 5 answers: *even when a thin built-up section passes elastic
+material yield, local plate buckling, and global Euler stability, could
+the section's flange/web assembly reach a lower empirical crippling limit
+first?*
+
+1. an explicit, visible crippling correlation (`alpha`, exponent `m` --
+   never hardcoded inside the formula) and a yield cap on the raw
+   prediction
+2. a conservative, load-independent section-level b/t geometry driver,
+   reused directly from the Milestone 3 plate-element mappings
+3. an axial-average crippling margin and a peak-compression margin
+   (reusing the existing built-up normal-stress extremes -- no new stress
+   theory), kept separately visible
+4. a section-level crippling assessment with a computed governing mode
+5. a `StructuralStatus` integrating yield, local buckling, Euler,
+   amplified yield, and crippling side by side -- their margins are never
+   mathematically blended; the reported "governing margin" is only the
+   minimum of the independently computed preliminary margins
+6. sensitivity to thickness, width, the correlation coefficient, and the
+   correlation exponent
+
+Explicitly **out of scope** for Milestone 5 (see [Limitations](#limitations)):
+sourced handbook/MMPDS/NASA crippling constants, certification allowables,
+plastic collapse, nonlinear postbuckling, effective-width iteration,
+local-global interaction knockdowns, nonlinear shell/beam FEA,
+torsional/flexural-torsional buckling, skin effective width,
+skin-stringer interaction, fasteners, fatigue, damage tolerance, multiple
+flight load cases, section optimization/search, and final portfolio
+figures.
+
 ## Coordinate / sign conventions
 
 Local member axes:
@@ -621,6 +660,89 @@ highly sensitive to member length and end restraint (K). A section can be
 globally strong but locally weak, or locally stocky but globally slender
 -- neither implies the other, and both remain separately reported.
 
+## Crippling and structural-status integration (Milestone 5)
+
+### Crippling-model philosophy
+
+Crippling correlations are empirical and depend on cross-section type,
+material, manufacturing, corner radii, element proportions, and the
+specific test database they were fitted to. This project therefore:
+
+- does **not** present one formula as universally authoritative,
+- does **not** silently invent aerospace handbook constants,
+- uses an explicitly illustrative correlation framework with every
+  coefficient (`alpha`, exponent `m`) a visible, explicit input, and
+- labels every result an **illustrative preliminary crippling screen**.
+
+The architecture keeps the correlation coefficients (`CripplingCorrelation`)
+fully separate from the assessment logic, so sourced coefficients could
+later replace the illustrative ones without changing how the section-level
+screen is computed.
+
+### Generic correlation and yield cap
+
+```
+sigma_cc = alpha * sqrt(E * sigma_y) * (t / b_ref)^m
+
+sigma_crippling = min(sigma_cc, sigma_y)   (a correlation should never predict
+                                             useful strength above yield)
+```
+
+Both the raw and yield-capped values, and whether the cap was active, are
+reported. This project's example study uses one illustrative baseline
+(`alpha = 1.2`, `m = 0.6`, within the milestone's suggested `alpha` in
+`[1.0, 2.0]`, `m` in `[0.5, 0.8]` range) chosen once and applied
+consistently -- never tuned after the fact to manufacture a particular
+governing mode.
+
+### Section-level geometry driver
+
+`section_geometry_driver` reuses the Milestone 3 plate-element mappings
+directly (no dimensional formula duplicated): it considers every mapped
+plate element and picks the **most slender** one (largest `b/t`) as the
+conservative representative `b_ref`/`t_ref` -- a larger `b/t` drives a
+*lower* (more conservative) crippling stress through `(t/b)^m`. This is a
+geometry-only, load-independent driver (matching the "pure axial
+compression: all longitudinal elements may participate" case).
+
+### Axial-average and peak-compression margins
+
+```
+P_comp = max(-N, 0)
+P_crippling = sigma_crippling * A            (section-average equivalent capacity)
+MS_axial_average = P_crippling/P_comp - 1    (None, trivial pass, at P_comp = 0)
+
+sigma_comp,max = |max_compressive_stress|    (reused directly from the existing
+                                               built-up normal-stress result --
+                                               accounts for bending, unlike the
+                                               axial-average check)
+MS_peak_compression = sigma_crippling/sigma_comp,max - 1  (None at zero compression)
+```
+
+Both margins stay separately visible; the governing mode ("axial_average"
+or "peak_compression") is whichever is smaller, determined by comparison
+-- the peak-compression location (top/bottom) swaps correctly when the
+bending moment reverses, since it is reused directly from the existing
+`evaluate_normal_stress` result.
+
+### Rectangle: reference-only
+
+The compact Milestone 1 rectangle is **not** a thin-walled built-up
+section, so the crippling correlation is not applied to it -- it is
+reported as not applicable (N/A) rather than forced through a correlation
+framework built for flange/web assemblies. The rectangle remains fully
+part of the yield/local/global comparisons.
+
+### Structural-status integration
+
+`StructuralStatus` reports yield, local buckling, Euler, amplified yield,
+and crippling **side by side** -- their margins are never mathematically
+blended into one synthetic interaction margin. The reported "governing
+check" and "governing margin" are simply the minimum of the independently
+computed, individually valid preliminary margins -- a reporting
+convenience, not a combined interaction equation. Overall preliminary pass
+requires every *applicable* check to pass.
+
 ## Verification summary
 
 **Milestone 1**: 89 tests across 7 test files, covering:
@@ -674,6 +796,18 @@ additional tests across 3 new test files, covering:
 - global assessment: an all-safe PASS, a constructed Euler-governed failure, a constructed amplified-yield-governed failure, deterministic governing-mode selection, component-order invariance, repeated-call determinism, and the combined (never-blended) overall status requiring both Euler and amplified yield to pass
 - section-level sensitivity through the full beam-column path: `P_cr` falling and amplification rising with member length, `P_cr` and Euler margin worsening with K, linear `EI` scaling, and the I-section's larger radius of gyration and Euler load vs. an equal-area compact rectangle
 
+**Milestone 5** (all Milestones 1-4 tests remain unchanged and green):
+additional tests across 4 new test files, covering:
+
+- correlation validation (alpha/exponent/non-finite/empty-label rejection), the hand-calculated correlation value at the milestone's own worked example (which comes out capped -- confirmed explicitly), a separate slender-element case confirming the cap can be inactive, and the exact-boundary case (raw == yield) correctly *not* flagged as cap-active
+- scaling verified entirely in the pre-cap regime (as required, using a deliberately slender constructed element): linear in alpha, `t^m`, `b^-m`, `sqrt(E)`, and `sqrt(sigma_y)`
+- section geometry driver: I/Z/hat governing-element (largest b/t) hand verification, a deterministic tie-break between the hat's two identical webs, component-order independence, and confirmation that panel length does not affect the geometry driver
+- axial capacity: `P_crippling = sigma_crippling * A`, zero-compression and tension both giving "not applicable", and the exact/below/above capacity boundary
+- peak-compression screen: pure-axial, pure-bending, and combined hand calculations (all reusing the existing built-up normal-stress result), moment-reversal swapping the governing compression side, zero-compression giving N/A, and the exact/below/above boundary
+- governing mode: an axial-average-vs-peak-compression tie (pure axial, no bending) resolved by the fixed tie-break order, a peak-compression-governed bending-dominated construction, and repeated-call determinism
+- structural-status integration: an all-safe overall PASS, six single-check-only failure constructions (yield, local buckling, Euler, amplified yield, and crippling each in turn, holding the other four safe) each correctly failing the overall status, the governing check matching the true minimum of the applicable margins, confirmation that the reported margin is never a synthetic blend (it always equals one of the independent margins exactly), and graceful handling when crippling is not applicable (e.g. the rectangle)
+- a dedicated regression test confirming that, for the Milestone 2/3 representative (fairly stocky) I/Z/hat proportions, the illustrative baseline correlation is honestly yield-capped for all three -- documenting rather than hiding this finding
+
 Run the full suite yourself (see below) — all tests pass.
 
 ## Representative built-up-section trade result
@@ -725,6 +859,38 @@ studies (I-section, L from 0.5-3.0 m and K from 0.5-2.0) show `P_cr`
 falling and the amplification factor `B` rising monotonically in both
 directions, without forcing a crossover to FAIL that does not occur at
 these illustrative values.
+
+## Representative crippling-screen result
+
+`examples/crippling_strength_study.py` screens the same I/Z/hat geometries
+(rectangle excluded -- see below) with one illustrative baseline
+correlation (`alpha = 1.2`, `m = 0.6`) under the common combined load:
+
+```
+section       gov elem    b/t   raw sig_cc  cap sig_cc  cap?  axial MS  peak MS   status
+I-section     web         13.5      1154         300    YES      5.10     1.38     PASS
+Z-section     web         13.8      1139         300    YES      4.87     1.28     PASS
+Hat-section   web_left     8.3      1545         300    YES      4.96     0.65     PASS
+```
+
+For these representative (fairly stocky, governing `b/t` of 8-14)
+proportions, the illustrative correlation predicts a raw crippling stress
+well above material yield in every case -- **the yield cap is active
+throughout**, so the capped crippling stress equals `sigma_y` and the
+crippling margins closely track the amplified-yield margins. This is the
+honest, un-tuned result of applying the milestone's own suggested
+coefficient range to these particular geometries; a dedicated regression
+test locks this finding in (see [Verification summary](#verification-summary)).
+The accompanying thickness, width, alpha, and exponent sensitivity studies
+(I-section) show the same plateau persisting across the entire ±50%
+sensitivity range explored, while separately-constructed thinner elements
+in the test suite confirm the correlation, cap, and all scaling laws
+behave correctly once genuinely below yield.
+
+The compact rectangle is excluded from the crippling screen entirely
+(reported N/A) -- it is not a thin-walled built-up section, so applying a
+flange/web crippling correlation to it would not be a meaningful
+comparison; it remains part of the yield/local/global comparisons.
 
 ## Limitations
 
@@ -814,11 +980,39 @@ Milestone 4 (in addition to the above, which still apply):
 - No local-global buckling interaction — Milestone 3's local-buckling
   margin and Milestone 4's Euler/amplified-yield margins are reported
   side by side, never combined into one interaction check.
-- No postbuckling behavior and no crippling.
+- No postbuckling behavior and no crippling (added in Milestone 5).
 - No skin effective width or skin-stringer interaction, no frame-ring
   global modes.
 - No fastener/joint effects, fatigue, or damage tolerance.
 - No certification knockdowns of any kind.
+- No certification claim of any kind.
+
+Milestone 5 (in addition to the above, which still apply):
+
+- The crippling correlation coefficients (`alpha`, `m`) are **explicitly
+  illustrative** — not sourced from MMPDS, NASA, or any vendor/test
+  database, and not claimed to be accurate for any real material,
+  cross-section family, or manufacturing process. Every crippling result
+  is labeled an "illustrative preliminary crippling screen."
+- No plastic collapse, no nonlinear postbuckling, no effective-width
+  iteration.
+- No local-global interaction knockdown — Milestone 3's local-buckling
+  margin and Milestone 5's crippling margin are reported side by side in
+  `StructuralStatus`, never combined into one interaction check.
+- No nonlinear shell/beam FEA.
+- No torsional or flexural-torsional buckling (unchanged from Milestone 4).
+- No skin effective width or skin-stringer interaction.
+- No fasteners, fatigue, or damage tolerance.
+- No multiple flight load cases and no section optimization/search — the
+  crippling screen is applied to the geometries as given, never resized
+  to force a particular outcome.
+- The section-level geometry driver considers the *most slender* mapped
+  plate element only (a single conservative b/t) — it does not model
+  interaction between multiple simultaneously-critical elements, corner
+  radii, or fastener/rivet-line effects on effective width.
+- `StructuralStatus`'s "governing margin" is explicitly documented as the
+  minimum of independently computed preliminary margins — a reporting
+  convenience, not a combined interaction equation.
 - No certification claim of any kind.
 
 ## Repository layout
@@ -845,6 +1039,8 @@ src/frame_stringer/
     local_buckling.py          # I/Z/hat plate mappings, stress extraction, section assessment (Milestone 3)
     column_buckling.py         # MemberGeometry, radius of gyration, slenderness, Euler buckling (Milestone 4)
     beam_column.py             # beam-column amplification, amplified-yield screen, global assessment (Milestone 4)
+    crippling.py               # CripplingCorrelation, geometry driver, section crippling assessment (Milestone 5)
+    structural_status.py       # StructuralStatus: yield/local/Euler/amplified-yield/crippling side by side (Milestone 5)
 
 tests/
     test_geometry.py
@@ -865,12 +1061,17 @@ tests/
     test_column_buckling.py
     test_beam_column.py
     test_global_stability_sensitivity.py
+    test_crippling.py
+    test_crippling_section.py
+    test_crippling_sensitivity.py
+    test_structural_status.py
 
 examples/
     frame_stringer_sanity.py         # Milestone 1 representative sanity case
     built_up_section_trade.py        # Milestone 2 equal-area section efficiency trade
     local_plate_buckling_study.py    # Milestone 3 local-buckling screening + sensitivity study
     global_member_buckling_study.py  # Milestone 4 global buckling + beam-column screening + sensitivity study
+    crippling_strength_study.py      # Milestone 5 crippling screening + structural-status integration + sensitivity study
 ```
 
 ## Installation / testing
@@ -884,6 +1085,7 @@ python examples/frame_stringer_sanity.py
 python examples/built_up_section_trade.py
 python examples/local_plate_buckling_study.py
 python examples/global_member_buckling_study.py
+python examples/crippling_strength_study.py
 ```
 
 ## License status
