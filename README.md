@@ -174,6 +174,45 @@ skin-stringer interaction, fasteners, fatigue, damage tolerance, multiple
 flight load cases, section optimization/search, and final portfolio
 figures.
 
+## Milestone 6 scope
+
+**Milestone 6 turns the verified single-load structural mechanics into a
+constrained multi-load-case sizing study. This is a preliminary sizing
+study, not a general-purpose optimizer: a small, explicit, bounded
+uniform-thickness search per fixed-geometry section family, solved by
+deterministic bisection over the verified mechanics -- no scipy, no
+gradient/genetic/black-box optimization.**
+
+Milestone 6 answers: *what is the minimum practical uniform-thickness
+section, within a deliberately bounded design space, that passes yield,
+local plate buckling, global member buckling, beam-column amplified
+yield, and the illustrative crippling screen across all representative
+load cases?*
+
+1. explicit named load cases (`FrameStringerLoadCase`, with a visible,
+   never-hidden `load_factor`)
+2. uniform-thickness scaling of the I/Z/hat factories, holding outer
+   geometry fixed at the Milestone 2 proportions -- never duplicating the
+   section-property equations
+3. a per-load-case assessment reusing all five existing independent
+   checks (yield, local buckling, Euler, amplified yield, crippling)
+   unchanged, and a per-section multi-load-case assessment built on top
+4. bounded bisection sizing with an explicit illustrative minimum gauge,
+   explicit never-silently-expanded search bounds, and an explicit
+   tolerance
+5. family comparison and a lowest-feasible-mass final recommendation --
+   no invented weighted score
+6. sensitivity to minimum gauge, member length, K, panel length, and the
+   crippling correlation's coefficients
+
+Explicitly **out of scope** for Milestone 6 (see [Limitations](#limitations)):
+topology optimization, continuous multi-variable optimization, genetic or
+gradient optimization, arbitrary geometry optimization, skin effective
+width, skin-stringer interaction, torsion, flexural-torsional buckling,
+nonlinear FEA, postbuckling, fatigue, damage tolerance, certification
+knockdowns, sourced handbook crippling coefficients, a manufacturing cost
+model, final portfolio figures, README consolidation, and licensing.
+
 ## Coordinate / sign conventions
 
 Local member axes:
@@ -743,6 +782,70 @@ computed, individually valid preliminary margins -- a reporting
 convenience, not a combined interaction equation. Overall preliminary pass
 requires every *applicable* check to pass.
 
+## Multi-load-case sizing study (Milestone 6)
+
+### Load cases
+
+`FrameStringerLoadCase` bundles a name with the three signed load
+components and an explicit `load_factor` (default 1.0) -- `design_load`
+applies the factor and returns a `SectionLoad`; no factor is ever hidden
+elsewhere in the package. `CANONICAL_LOAD_CASES` is a small, illustrative
+set of four structurally different cases (pressure/compression, maneuver
+bending, gust/shear, landing/ground combined) -- verified in the test
+suite to produce genuinely different governing constraints, not tuned to
+force a particular failure mode.
+
+### Uniform-thickness scaling policy
+
+To keep the design space bounded and interpretable, each factory
+section's *outer* geometry (flange width, overall height, crown width,
+etc.) is held fixed at the Milestone 2 canonical proportions, and every
+wall/flange/web thickness is scaled together to one uniform design
+thickness `t` (`build_uniform_i_section(t)`, `build_uniform_z_section(t)`,
+`build_uniform_hat_section(t)`, each calling the existing, unmodified
+factory constructors -- no dimensional formula is duplicated). **Milestone
+6 sizes a uniform-gauge version of each fixed outer geometry; it does not
+optimize individual element thicknesses.**
+
+### Minimum gauge and bounded bisection
+
+An explicit `t_min_gauge` (illustrative minimum manufacturing gauge --
+not a certification/manufacturer requirement) and explicit search bounds
+`[t_min_search, t_max_search]` are always visible inputs. The effective
+lower bound is `max(t_min_search, t_min_gauge)`; the search upper bound is
+never silently expanded. Because the "all load cases pass" predicate was
+verified (in the test suite, over a thickness grid, for every family) to
+be monotonic non-decreasing in `t` for the canonical geometries and load
+cases, bounded bisection is used (tolerance `1e-6` m by default) rather
+than a black-box optimizer -- if the lower bound already passes, it is
+returned directly (`"minimum_gauge_governs"` if that bound came from the
+gauge); if the upper bound fails, the search reports
+`"upper_bound_infeasible"` rather than silently expanding; otherwise
+bisection converges to the minimum passing thickness (`"converged"`),
+which is always returned as a *passing* thickness, never a failing one.
+
+### Per-load-case and multi-case assessment
+
+`assess_load_case` reuses all five existing, unmodified checks (yield,
+local buckling, Euler, amplified yield, crippling) and
+`assess_structural_status`'s fixed tie-break order (`yield`,
+`local_buckling`, `euler`, `amplified_yield`, `crippling`) directly --
+no new equation or tie-break convention is introduced.
+`assess_multi_load_case` runs every supplied load case and selects the
+governing one by the same minimum-applicable-margin convention, with a
+deterministic tie-break on the supplied load-case order.
+
+### Family comparison and recommendation
+
+Every family is sized under **identical** assumptions (material, load
+cases, panel length, member geometry, K, minimum gauge, crippling
+correlation, and search bounds/tolerance -- the fairness rule).
+`recommend_family` returns the lowest-mass-per-length *feasible* result
+(ties broken by the fixed family order); mass reuses
+`frame_stringer.mass.linear_mass` unchanged. No weighted score is
+invented, and an all-infeasible study returns `None` explicitly rather
+than a misleading default.
+
 ## Verification summary
 
 **Milestone 1**: 89 tests across 7 test files, covering:
@@ -807,6 +910,20 @@ additional tests across 4 new test files, covering:
 - governing mode: an axial-average-vs-peak-compression tie (pure axial, no bending) resolved by the fixed tie-break order, a peak-compression-governed bending-dominated construction, and repeated-call determinism
 - structural-status integration: an all-safe overall PASS, six single-check-only failure constructions (yield, local buckling, Euler, amplified yield, and crippling each in turn, holding the other four safe) each correctly failing the overall status, the governing check matching the true minimum of the applicable margins, confirmation that the reported margin is never a synthetic blend (it always equals one of the independent margins exactly), and graceful handling when crippling is not applicable (e.g. the rectangle)
 - a dedicated regression test confirming that, for the Milestone 2/3 representative (fairly stocky) I/Z/hat proportions, the illustrative baseline correlation is honestly yield-capped for all three -- documenting rather than hiding this finding
+
+Run the full suite yourself (see below) — all tests pass.
+
+**Milestone 6** (all Milestones 1-5 tests remain unchanged and green):
+additional tests across 4 new test files, covering:
+
+- load-case validation (name/non-finite/load-factor rejection), design-load scaling, and signed-load preservation
+- uniform-thickness factory wrappers: thickness propagation to every I/Z/hat wall element, fixed outer geometry (overall height, flange width) preserved while `t` changes, and invalid-thickness rejection
+- single-load-case assessment returning all five checks, a safe PASS, five separate constructed single-constraint failures (one per check: yield, local buckling, Euler, amplified yield, crippling), the governing constraint matching the true minimum applicable margin, deterministic exact-tie behavior, and repeated-call determinism
+- multi-case assessment: all-safe PASS, one-failing-case FAIL, governing-load-case selection by minimum margin, load-case order preservation, deterministic ties, and identical duplicate cases using the first occurrence
+- thickness monotonicity: area and mass strictly increasing with `t`, and "all load cases pass" verified non-decreasing (no oscillation) over a thickness grid for all three families -- the precondition the sizing search's bisection relies on
+- sizing: an already-passing lower bound, minimum-gauge-governs, lower-fails/upper-passes convergence, the returned thickness verified to actually pass (and a slightly thinner point verified to fail), explicit upper-bound-infeasible handling with diagnostics still exposed, repeated-call determinism, bounds/tolerance respected, and the returned mass matching `linear_mass` exactly
+- family comparison: identical assumptions applied to every family, the recommendation matching the true minimum feasible mass, family-order invariance when masses differ, a deterministic tie-break with synthetic equal masses, an infeasible family excluded honestly, and an all-infeasible study returning `None` rather than a misleading default
+- sensitivity: increasing minimum gauge can only increase (never decrease) the selected thickness and mass, gauge governing exactly once it exceeds the structural requirement, increasing member length or K never improving the Euler capacity (and both propagating into a higher required sizing thickness), a genuinely crippling-governed weak-correlation case requiring more thickness than a strong one, and panel length leaving the compression-buckling critical stress unchanged for a fixed section
 
 Run the full suite yourself (see below) — all tests pass.
 
@@ -891,6 +1008,38 @@ The compact rectangle is excluded from the crippling screen entirely
 (reported N/A) -- it is not a thin-walled built-up section, so applying a
 flange/web crippling correlation to it would not be a meaningful
 comparison; it remains part of the yield/local/global comparisons.
+
+## Representative multi-load-case sizing result
+
+`examples/multi_load_case_sizing.py` sizes uniform-thickness I/Z/hat
+sections across the four canonical load cases, under the same material,
+panel length (300 mm), member length (1200 mm), K (1.0), crippling
+correlation, and search bounds (0.75-6.0 mm, 1e-6 m tolerance) for every
+family:
+
+```
+family       req t [mm]  area [mm2]  mass [kg/m]           gov case      gov constraint  status
+I-section         3.877       823.0        2.222  landing/ground comb.   amplified_yield  converged
+Z-section         5.132       923.8        2.494  landing/ground comb.   amplified_yield  converged
+Hat-section       5.076      1221.7        3.298  landing/ground comb.   amplified_yield  converged
+```
+
+**Final recommendation: I-section at t = 3.877 mm, 2.222 kg/m** -- the
+lowest feasible mass among the three families under identical assumptions.
+The governing load case ("landing/ground combined", the highest
+compressive axial force) and constraint (amplified yield) were not
+assumed in advance: at the selected design, "gust/shear" (the highest
+shear case) instead governs via ordinary yield, and the other two cases
+have comfortable margins -- exactly the kind of load-case-dependent
+governance the milestone set out to demonstrate. The accompanying
+sensitivity studies show required thickness rising monotonically with
+member length (3.63-4.73 mm over L = 0.75-2.0 m) and with K (3.58-5.43 mm
+over K = 0.5-2.0), while panel length and the crippling correlation's
+coefficients have *no* effect on this particular selected design, because
+amplified yield -- not local-buckling shear or crippling -- governs
+throughout its feasible range; a more slender design could see either
+become the governing sensitivity instead (as Milestone 5's dedicated
+weak-correlation test confirms).
 
 ## Limitations
 
@@ -1003,9 +1152,11 @@ Milestone 5 (in addition to the above, which still apply):
 - No torsional or flexural-torsional buckling (unchanged from Milestone 4).
 - No skin effective width or skin-stringer interaction.
 - No fasteners, fatigue, or damage tolerance.
-- No multiple flight load cases and no section optimization/search — the
-  crippling screen is applied to the geometries as given, never resized
-  to force a particular outcome.
+- No multiple flight load cases and no section optimization/search (added
+  as a *bounded, deterministic* uniform-thickness search in Milestone 6 --
+  see below; still not a general-purpose optimizer) — the crippling
+  screen is applied to the geometries as given, never resized to force a
+  particular outcome.
 - The section-level geometry driver considers the *most slender* mapped
   plate element only (a single conservative b/t) — it does not model
   interaction between multiple simultaneously-critical elements, corner
@@ -1013,6 +1164,34 @@ Milestone 5 (in addition to the above, which still apply):
 - `StructuralStatus`'s "governing margin" is explicitly documented as the
   minimum of independently computed preliminary margins — a reporting
   convenience, not a combined interaction equation.
+- No certification claim of any kind.
+
+Milestone 6 (in addition to the above, which still apply):
+
+- **This is a preliminary sizing study, not a general-purpose
+  optimizer.** No scipy, gradient, genetic, or other black-box
+  optimization is used — only deterministic bounded bisection (verified
+  monotonic for the canonical geometries/load cases) over the unmodified
+  Milestone 1-5 mechanics.
+- Uniform-thickness scaling only — each family's outer geometry is held
+  fixed and every wall/flange/web thickness is scaled together to one
+  design value `t`; individual element thicknesses are never optimized
+  independently, and no topology or continuous multi-variable
+  optimization is performed.
+- The illustrative minimum manufacturing gauge (`t_min_gauge`) is exactly
+  that — illustrative. It is not a certification or manufacturer
+  requirement, and it does not itself model damage tolerance, handling
+  robustness, corrosion allowance, or manufacturing detail (e.g. corner
+  radii, fastener holes).
+- The load cases in `CANONICAL_LOAD_CASES` are explicitly illustrative,
+  chosen only to be structurally distinct — they are not derived from any
+  certified flight-loads envelope.
+- No skin effective width, skin-stringer interaction, torsion, or
+  flexural-torsional buckling (unchanged from earlier milestones).
+- No nonlinear FEA, postbuckling, fatigue, damage tolerance, or
+  certification knockdowns.
+- No sourced handbook crippling coefficients (unchanged from Milestone 5)
+  and no manufacturing cost model.
 - No certification claim of any kind.
 
 ## Repository layout
@@ -1041,6 +1220,9 @@ src/frame_stringer/
     beam_column.py             # beam-column amplification, amplified-yield screen, global assessment (Milestone 4)
     crippling.py               # CripplingCorrelation, geometry driver, section crippling assessment (Milestone 5)
     structural_status.py       # StructuralStatus: yield/local/Euler/amplified-yield/crippling side by side (Milestone 5)
+    load_cases.py              # FrameStringerLoadCase, CANONICAL_LOAD_CASES (Milestone 6)
+    sizing.py                  # uniform-thickness factories, per-case/multi-case assessment, bisection sizing (Milestone 6)
+    design_study.py            # StudyAssumptions, family comparison and recommendation (Milestone 6)
 
 tests/
     test_geometry.py
@@ -1065,6 +1247,10 @@ tests/
     test_crippling_section.py
     test_crippling_sensitivity.py
     test_structural_status.py
+    test_load_cases.py
+    test_sizing.py
+    test_design_study.py
+    test_sizing_sensitivity.py
 
 examples/
     frame_stringer_sanity.py         # Milestone 1 representative sanity case
@@ -1072,6 +1258,7 @@ examples/
     local_plate_buckling_study.py    # Milestone 3 local-buckling screening + sensitivity study
     global_member_buckling_study.py  # Milestone 4 global buckling + beam-column screening + sensitivity study
     crippling_strength_study.py      # Milestone 5 crippling screening + structural-status integration + sensitivity study
+    multi_load_case_sizing.py        # Milestone 6 multi-load-case uniform-thickness sizing study + sensitivity study
 ```
 
 ## Installation / testing
@@ -1086,6 +1273,7 @@ python examples/built_up_section_trade.py
 python examples/local_plate_buckling_study.py
 python examples/global_member_buckling_study.py
 python examples/crippling_strength_study.py
+python examples/multi_load_case_sizing.py
 ```
 
 ## License status

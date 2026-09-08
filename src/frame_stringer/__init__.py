@@ -101,6 +101,29 @@ as a sourced handbook (e.g. MMPDS) or certification value.
    mathematically blended; the reported "governing margin" is only the
    minimum of the independently computed preliminary margins
 
+Milestone 6 scope
+------------------
+Milestone 6 turns the verified single-load structural mechanics into a
+constrained multi-load-case sizing study. This is a **preliminary sizing
+study, not a general-purpose optimizer**: the design space is a small,
+explicit, bounded uniform-thickness search per fixed-geometry section
+family, using deterministic bisection over the verified mechanics -- no
+scipy, gradient, or genetic optimization.
+
+1. explicit named load cases (`FrameStringerLoadCase`, with a visible,
+   never-hidden `load_factor`)
+2. uniform-thickness scaling of the I/Z/hat factories, holding outer
+   geometry fixed at the Milestone 2 proportions (never duplicating the
+   section-property equations)
+3. a per-load-case assessment reusing all five existing independent
+   checks (yield, local buckling, Euler, amplified yield, crippling)
+   unchanged, and a per-section multi-load-case assessment built on top
+4. bounded bisection sizing with an explicit illustrative minimum gauge,
+   explicit search bounds, and a documented, never-silently-expanded
+   search
+5. family comparison and a lowest-feasible-mass recommendation -- no
+   invented weighted score
+
 This is a beam-section model, NOT a shell/frame finite-element model. It uses
 elementary (Euler-Bernoulli) beam theory only.
 
@@ -153,4 +176,7 @@ __all__ = [
     "beam_column",
     "crippling",
     "structural_status",
+    "load_cases",
+    "sizing",
+    "design_study",
 ]
