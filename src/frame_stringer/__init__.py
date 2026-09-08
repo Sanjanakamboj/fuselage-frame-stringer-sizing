@@ -13,6 +13,27 @@ any realistic frame/stringer sizing can be attempted:
 6. section mass per unit length
 7. a representative sanity case tying it all together
 
+Milestone 2 scope
+------------------
+Milestone 2 extends the verified rectangular mechanics to built-up
+frame/stringer sections assembled from rectangular components (I, Z, hat):
+
+1. a generic rectangular component primitive and built-up section geometry
+   (centroid, area, parallel-axis I_z, asymmetric top/bottom section moduli)
+2. I-section, Z-section, and hat-section factories
+3. normal stress about the built-up (generally nonzero) centroid
+4. general Q(y)/(I*b_local(y)) transverse shear, with Q and b_local computed
+   geometrically from the components -- not a hardcoded per-shape formula
+5. elastic von Mises strength screening at a deterministic set of critical
+   points (extreme fibers, neutral axis, and just inside every internal
+   component boundary, to capture flange/web-style shear jumps)
+6. mass per unit length (reusing the Milestone 1 mass equations unchanged)
+7. an equal-area section-efficiency comparison
+
+The resulting stress model is still an elementary beam-section treatment;
+local plate buckling, crippling, torsion, shear-center effects, and skin
+interaction remain deferred to a later milestone.
+
 This is a beam-section model, NOT a shell/frame finite-element model. It uses
 elementary (Euler-Bernoulli) beam theory only.
 
@@ -55,4 +76,8 @@ __all__ = [
     "stress",
     "strength",
     "mass",
+    "built_up_geometry",
+    "sections",
+    "built_up_stress",
+    "built_up_strength",
 ]
