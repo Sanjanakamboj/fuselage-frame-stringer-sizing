@@ -188,8 +188,15 @@ def figure_3_constraint_margins(best):
             if v > y_cap:
                 ax.text(bar.get_x() + bar.get_width() / 2, y_cap + 0.05, f"{v:.1f}", ha="center", va="bottom", fontsize=7, rotation=90)
 
-    ax.axhline(0.0, color="red", linewidth=1.2, linestyle="--", label="zero-margin boundary")
-    ax.set_ylim(top=y_cap + 0.6)
+    # Give a little headroom below zero so the zero-margin boundary is a
+    # clearly visible, standalone line rather than coinciding with the
+    # bottom axis spine -- shade the infeasible (margin < 0) region below
+    # it for extra visual emphasis. No margin values or the Euler-capping
+    # convention above are changed by this presentation-only styling.
+    y_bottom = -0.3
+    ax.axhspan(y_bottom, 0.0, color="red", alpha=0.08, zorder=0)
+    ax.axhline(0.0, color="red", linewidth=2.4, linestyle="--", zorder=10, label="zero-margin boundary (fail below)")
+    ax.set_ylim(bottom=y_bottom, top=y_cap + 0.6)
     ax.set_xticks(list(x))
     ax.set_xticklabels(case_names, rotation=12, ha="right")
     ax.set_ylabel(f"Margin (capped at {y_cap:.0f}; true value labeled above)")
