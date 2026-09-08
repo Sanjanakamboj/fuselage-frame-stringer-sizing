@@ -101,6 +101,40 @@ fastener/joint effects, fatigue, damage tolerance, nonlinear shell FEA,
 certification knockdowns, sourced aerospace allowables, multi-load-case
 sizing search, mass optimization, and final portfolio figures.
 
+## Milestone 4 scope
+
+**Milestone 4 adds ideal elastic global member buckling and first-order
+beam-column moment amplification. Local plate buckling, global Euler
+instability, and material yield remain separate checks; no nonlinear
+collapse or certification knockdowns are implied.**
+
+Milestone 4 answers: *a section may pass yield and local plate buckling,
+but will the complete frame/stringer member remain globally stable under
+compressive axial load and combined axial compression + bending?*
+
+1. an explicit member geometry (length, effective-length factor K -- never
+   buried inside a section or material object)
+2. radius of gyration and slenderness ratio, reusing existing section
+   area/I_z
+3. the classical ideal elastic Euler critical load/stress and its margin
+4. a first-order elastic beam-column moment-amplification factor
+5. a beam-column amplified-yield screen that reuses the existing
+   (unmodified) built-up stress/yield machinery, with only the bending
+   moment replaced
+6. a combined axial-compression + bending global-stability assessment with
+   a computed (never assumed) governing mode
+7. a side-by-side yield/local-buckling/global-Euler/amplified-yield summary
+8. member-length, K, and section-stiffness sensitivity studies
+
+Explicitly **out of scope** for Milestone 4 (see [Limitations](#limitations)):
+empirical crippling, Johnson/inelastic column formulas, local-global
+interaction knockdowns, postbuckling, nonlinear geometry, nonlinear
+beam-column FEA, torsional buckling, flexural-torsional buckling, warping,
+frame-ring global modes, skin effective width, skin-stringer interaction,
+fastener/joint effects, fatigue, damage tolerance, certification
+knockdowns, multi-load-case sizing search, mass optimization, and final
+portfolio figures.
+
 ## Coordinate / sign conventions
 
 Local member axes:
@@ -499,6 +533,94 @@ Milestone 2-vs-3 lesson: elastic beam-stress/yield checks alone do not
 guarantee that a bending-efficient section's thin elements are locally
 stable.
 
+## Global member buckling and beam-column mechanics (Milestone 4)
+
+### Member geometry and the effective-length convention
+
+A `MemberGeometry` carries only `length` (L, the physical unsupported
+member length) and `effective_length_factor` (K) -- both must be finite
+and > 0. K is always an **explicit, visible modeling assumption**, never
+buried inside a section or material object. Illustrative classical values:
+K = 0.5 (fixed-fixed idealization), K = 0.7 (restrained-end illustrative
+case), K = 1.0 (pinned-pinned), K = 2.0 (fixed-free) -- none of these claim
+to exactly represent a specific real fuselage frame/stringer installation.
+
+```
+L_eff = K * L
+```
+
+### Radius of gyration and slenderness
+
+```
+r_g = sqrt(I_z / A)          (reuses the section's own .area / .moment_of_inertia_z -- never duplicated)
+lambda = K*L / r_g            (slenderness ratio, dimensionless)
+```
+
+### Euler critical load and stress
+
+```
+P_cr      = pi^2 * E * I_z / (K*L)^2
+sigma_cr  = P_cr / A   =   pi^2*E / lambda^2      (both forms verified equivalent)
+
+P_comp = max(-N, 0)            (Milestone 1-2 convention: N < 0 = compression)
+MS_Euler = P_cr/P_comp - 1     (None, trivially passing, if P_comp == 0 -- i.e. N >= 0)
+```
+
+This is the **ideal elastic Euler global-buckling margin** -- not a flight
+or certification margin. `P_comp == P_cr` gives margin exactly 0 (PASS).
+Only the compressive axial component drives this bare Euler check; bending
+does not alter it (bending's effect is handled separately, below).
+
+### First-order beam-column amplification
+
+Axial compression amplifies bending demand *before* Euler collapse:
+
+```
+B = 1 / (1 - P_comp/P_cr)              for 0 <= P_comp < P_cr
+M_amplified = M_applied * B
+
+e = |M_applied| / P_comp               (first-order eccentricity diagnostic; None at P_comp = 0)
+```
+
+This is the **first-order elastic beam-column amplification** -- not a
+nonlinear collapse solution. At `P_comp = 0`, `B = 1` (no amplification);
+as `P_comp` approaches `P_cr`, `B` grows without bound; at `P_comp >=
+P_cr`, `B` and `M_amplified` are `None` (global instability -- reported
+explicitly, never a divide-by-zero or a misleadingly finite number).
+
+### Beam-column amplified-yield screen
+
+The amplified moment is fed back into the **existing, unmodified**
+built-up (or rectangular) stress/von-Mises machinery -- `N` and `V_y`
+unchanged, only `M_z` replaced by `M_amplified`:
+
+```
+sigma_x(y) = N/A - M_amplified*(y - y_bar)/I_z
+```
+
+No stress equation is duplicated. This is labeled the **beam-column
+amplified yield screen**, and the ordinary (unamplified, Milestone 1/2)
+yield result remains separately visible alongside it -- never overwritten.
+
+### Combined assessment and section-level summary
+
+`assess_beam_column` returns Euler and amplified-yield results together,
+with a governing mode ("euler" or "amplified_yield") chosen by comparing
+margins -- never assumed, with a fixed (euler, amplified_yield) tie-break.
+Overall pass requires `euler_passes AND amplified_yield_passes`.
+`section_stability_summary` reports yield, local-buckling, Euler, and
+amplified-yield pass/fail and their four margins **side by side** -- these
+are never blended into one synthetic combined margin.
+
+### Local vs. global stability
+
+Local buckling (Milestone 3) depends on an individual plate's own `b/t`
+and is essentially insensitive to overall member length. Global Euler
+buckling (Milestone 4) depends on the *whole section's* `I_z/A` and is
+highly sensitive to member length and end restraint (K). A section can be
+globally strong but locally weak, or locally stocky but globally slender
+-- neither implies the other, and both remain separately reported.
+
 ## Verification summary
 
 **Milestone 1**: 89 tests across 7 test files, covering:
@@ -540,6 +662,18 @@ additional tests across 3 new test files, covering:
 - section-level assessment: an all-safe PASS, constructed compression-buckling and shear-buckling failures, a case with both compression and shear margins present, deterministic governing-plate tie-break, repeated-call determinism, yield-passes-while-buckling-fails and buckling-passes-while-yield-fails constructions, and the combined (never-blended) overall status
 - section-level sensitivity: flange/web thickness scaling, panel-length effect on shear (not compression) critical stress, and outstand-width scaling -- each verified through the full I-section factory mapping, not just the raw plate formulas
 
+**Milestone 4** (all Milestones 1-3 tests remain unchanged and green):
+additional tests across 3 new test files, covering:
+
+- member-geometry validation (length/K/non-finite rejection) and effective-length hand calculation
+- radius-of-gyration and slenderness hand calculations, linearity in K and L, and the decrease in slenderness as radius of gyration increases
+- Euler hand calculation, the stress/load-form identity (`P_cr/A` vs. `pi^2*E/lambda^2`), L⁻² scaling, K⁻² scaling, linear E scaling, linear I scaling, zero-compression and tension both giving "not applicable", and the exact/below/above `P_cr` boundary
+- amplification factor: `B=1` at zero compression, the 0.5·P_cr → B=2 hand calculation, monotonic increase, strong growth approaching `P_cr`, and explicit (never silently divided) handling at/above `P_cr`
+- amplified moment: zero applied moment stays zero, linear scaling at fixed `P/P_cr`, and moment reversal flipping only the sign
+- amplified stress/yield: zero compression reproduces the ordinary built-up strength result exactly, compressive load increases bending magnitude, amplified top/bottom stress hand calculation, moment reversal swapping top/bottom, shear left unchanged, and a constructed case where amplified yield fails while the unamplified screen still passes
+- global assessment: an all-safe PASS, a constructed Euler-governed failure, a constructed amplified-yield-governed failure, deterministic governing-mode selection, component-order invariance, repeated-call determinism, and the combined (never-blended) overall status requiring both Euler and amplified yield to pass
+- section-level sensitivity through the full beam-column path: `P_cr` falling and amplification rising with member length, `P_cr` and Euler margin worsening with K, linear `EI` scaling, and the I-section's larger radius of gyration and Euler load vs. an equal-area compact rectangle
+
 Run the full suite yourself (see below) — all tests pass.
 
 ## Representative built-up-section trade result
@@ -564,6 +698,33 @@ particular combined load with this material — the geometries were not
 tuned to force a pass or fail; see [Efficiency interpretation](#built-up-section-mechanics-milestone-2)
 above for the full discussion, including the I-section's flange/web shear
 jump.
+
+## Representative global-stability result
+
+`examples/global_member_buckling_study.py` screens the same rectangle/I/Z/hat
+geometries at an illustrative member length L = 1200 mm, K = 1.0
+(pinned-pinned), under the Milestone 1 representative combined load:
+
+```
+section       Pcr [kN]   P/Pcr      B   unamp MS   amp MS   Euler MS   status
+Rectangle       407.7   0.1962 1.2441      0.258    0.055      4.096     PASS
+I-section      1251.5   0.0639 1.0683      1.269    1.209     14.644     PASS
+Z-section      1216.6   0.0658 1.0704      1.207    1.148     14.208     PASS
+Hat-section     492.1   0.1626 1.1941      0.648    0.445      5.152     PASS
+```
+
+The I- and Z-sections' larger `I_z/A` (and hence radius of gyration) gives
+them roughly 3x the compact rectangle's Euler critical load at comparable
+area -- the same material redistribution that helped Milestone 2's bending
+efficiency also helps Milestone 4's global stability. All four sections
+pass at this length; the rectangle's *amplified* yield margin (0.055) is
+far thinner than its unamplified one (0.258), and far thinner than the
+I-section's (1.209) at the same load and length, showing the beam-column
+amplification effect concretely. The accompanying length and K sensitivity
+studies (I-section, L from 0.5-3.0 m and K from 0.5-2.0) show `P_cr`
+falling and the amplification factor `B` rising monotonically in both
+directions, without forcing a crossover to FAIL that does not occur at
+these illustrative values.
 
 ## Limitations
 
@@ -617,9 +778,9 @@ Milestone 3 (in addition to the above, which still apply):
 - Outstanding-plate shear buckling is explicitly **not implemented**
   (reported as not-applicable) rather than reusing the internal-plate
   formula without justification.
-- No overall Euler/beam-column buckling, skin-stringer interaction,
-  frame-ring global instability, torsional or distortional buckling, or
-  warping.
+- No overall Euler/beam-column buckling (added in Milestone 4), skin-stringer
+  interaction, frame-ring global instability, torsional or distortional
+  buckling, or warping.
 - No fastener/joint effects, fatigue, or damage tolerance.
 - No nonlinear shell FEA.
 - No certification knockdowns or sourced aerospace allowables.
@@ -634,6 +795,30 @@ Milestone 3 (in addition to the above, which still apply):
   accurate for the linear-normal-stress / smooth-quadratic-shear fields
   produced by this beam model, but is a numerical approximation, not an
   exact analytical optimum.
+- No certification claim of any kind.
+
+Milestone 4 (in addition to the above, which still apply):
+
+- Ideal elastic Euler buckling only — a straight, prismatic, initially
+  perfect member; no initial crookedness, no residual stress.
+- No plastic/inelastic column behavior — no Johnson, Rankine, or other
+  inelastic-column correction formulas.
+- The effective-length factor K is an idealized, explicit, user-supplied
+  modeling assumption (e.g. K = 0.5/0.7/1.0/2.0 illustrative cases) — it
+  does not claim to represent the true end restraint of any specific real
+  fuselage frame/stringer installation.
+- No lateral-torsional buckling and no flexural-torsional buckling.
+- No geometric nonlinear analysis and no nonlinear beam-column FEA — the
+  beam-column amplification used is the classical linear (first-order)
+  `1/(1-P/Pcr)` result, not a large-deflection solution.
+- No local-global buckling interaction — Milestone 3's local-buckling
+  margin and Milestone 4's Euler/amplified-yield margins are reported
+  side by side, never combined into one interaction check.
+- No postbuckling behavior and no crippling.
+- No skin effective width or skin-stringer interaction, no frame-ring
+  global modes.
+- No fastener/joint effects, fatigue, or damage tolerance.
+- No certification knockdowns of any kind.
 - No certification claim of any kind.
 
 ## Repository layout
@@ -658,6 +843,8 @@ src/frame_stringer/
     built_up_strength.py       # built-up strength assessment, bending yield capacity (Milestone 2)
     plate_buckling.py          # PlateElement, compression/shear buckling, margins, interaction (Milestone 3)
     local_buckling.py          # I/Z/hat plate mappings, stress extraction, section assessment (Milestone 3)
+    column_buckling.py         # MemberGeometry, radius of gyration, slenderness, Euler buckling (Milestone 4)
+    beam_column.py             # beam-column amplification, amplified-yield screen, global assessment (Milestone 4)
 
 tests/
     test_geometry.py
@@ -675,11 +862,15 @@ tests/
     test_plate_buckling.py
     test_local_buckling.py
     test_local_buckling_sensitivity.py
+    test_column_buckling.py
+    test_beam_column.py
+    test_global_stability_sensitivity.py
 
 examples/
     frame_stringer_sanity.py         # Milestone 1 representative sanity case
     built_up_section_trade.py        # Milestone 2 equal-area section efficiency trade
     local_plate_buckling_study.py    # Milestone 3 local-buckling screening + sensitivity study
+    global_member_buckling_study.py  # Milestone 4 global buckling + beam-column screening + sensitivity study
 ```
 
 ## Installation / testing
@@ -692,6 +883,7 @@ pytest -q
 python examples/frame_stringer_sanity.py
 python examples/built_up_section_trade.py
 python examples/local_plate_buckling_study.py
+python examples/global_member_buckling_study.py
 ```
 
 ## License status

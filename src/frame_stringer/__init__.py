@@ -53,6 +53,32 @@ width, or certification knockdowns.
    stress solution
 6. a section-level local-buckling assessment with a governing plate/mode
 
+Milestone 4 scope
+------------------
+Milestone 4 adds ideal elastic global member buckling and first-order
+beam-column moment amplification. Local plate buckling, global Euler
+instability, and material yield remain separate checks; no nonlinear
+collapse or certification knockdowns are implied.
+
+1. an explicit member geometry (length, effective-length factor K -- never
+   buried inside a section or material object)
+2. radius of gyration and slenderness ratio (reusing existing section
+   area/I_z, never duplicating the section-property equations)
+3. the classical ideal elastic Euler critical load/stress and its margin
+4. a first-order elastic beam-column moment-amplification factor, and a
+   beam-column amplified-yield screen that reuses the existing
+   (unmodified) built-up stress/yield machinery with only the bending
+   moment replaced
+5. a combined axial-compression + bending global-stability assessment with
+   a computed governing mode (never blending Euler and yield margins)
+6. a side-by-side yield/local-buckling/global-Euler/amplified-yield summary
+
+This is still an ideal elastic first-order stability screen: a straight,
+prismatic, initially-perfect member, with an explicit effective-length
+factor as a modeling assumption -- not inelastic column behavior, not
+lateral-torsional or flexural-torsional buckling, and not a certification
+allowable.
+
 This is a beam-section model, NOT a shell/frame finite-element model. It uses
 elementary (Euler-Bernoulli) beam theory only.
 
@@ -101,4 +127,6 @@ __all__ = [
     "built_up_strength",
     "plate_buckling",
     "local_buckling",
+    "column_buckling",
+    "beam_column",
 ]
