@@ -67,6 +67,40 @@ torsion, shear-center calculations, warping, fastener/joint effects,
 fatigue, plasticity, nonlinear FEA, section optimization/search, multiple
 flight load cases, certification allowables, and final portfolio figures.
 
+## Milestone 3 scope
+
+**Milestone 3 adds classical elastic local-plate-buckling screens to the
+verified built-up beam sections. These checks identify the onset of ideal
+plate instability; they do not model postbuckling, crippling, effective
+width, or certification knockdowns.**
+
+Milestone 3 answers: *does a built-up section that passes the elastic von
+Mises stress check remain locally stable in its thin web/flange/crown
+elements under the same axial+bending+shear load state?*
+
+1. a rectangular plate-element primitive with an explicit "internal" or
+   "outstanding" boundary condition
+2. classical illustrative elastic compression-buckling and shear-buckling
+   coefficients and critical stresses
+3. compression, shear, and an illustrative preliminary interaction margin
+   -- kept strictly separate from (never blended with) the elastic von
+   Mises yield margin
+4. explicit I/Z/hat plate-element mappings (web, flange outstands, crown)
+   built directly from the same factory geometry parameters
+5. local stress demand sampled from the existing, already-verified
+   built-up beam stress solution (no new stress theory)
+6. a section-level local-buckling assessment with a computed (never
+   assumed) governing plate and mode
+7. a thickness/width/panel-length/boundary-condition sensitivity study
+
+Explicitly **out of scope** for Milestone 3 (see [Limitations](#limitations)):
+empirical crippling, postbuckling, plasticity, effective-width iteration,
+overall Euler/beam-column buckling, skin-stringer interaction, frame-ring
+global instability, torsional/distortional buckling, warping,
+fastener/joint effects, fatigue, damage tolerance, nonlinear shell FEA,
+certification knockdowns, sourced aerospace allowables, multi-load-case
+sizing search, mass optimization, and final portfolio figures.
+
 ## Coordinate / sign conventions
 
 Local member axes:
@@ -316,6 +350,155 @@ I_z / A                    (bending-stiffness efficiency)
 min(S_top, S_bottom) / A   (first-yield bending efficiency)
 ```
 
+## Local plate buckling mechanics (Milestone 3)
+
+### Plate-element model and boundary conditions
+
+A `PlateElement` is an idealized rectangular plate: width `b` (unsupported
+width transverse to the compressive stress direction), thickness `t`,
+length `a` (in the loading/longitudinal direction -- the panel length /
+frame spacing), and an explicit boundary condition, one of:
+
+- `"internal"` -- both unloaded (longitudinal) edges simply supported
+  (e.g. a web, held by a flange on each side).
+- `"outstanding"` -- one unloaded edge simply supported, the other free
+  (e.g. an I-flange half-outstand, a Z-flange, a hat's crown-to-flange leg).
+
+These are **classical illustrative plate coefficients** for a first-order
+elastic screen -- not a certification standard and not a complete
+aerospace design rule (no elastic edge restraint, no postbuckling).
+
+### Compression buckling
+
+```
+k_c(internal) = 4.0
+k_c(outstanding) = 0.43
+
+sigma_cr = k_c * pi^2*E / [12*(1-nu^2)] * (t/b)^2
+```
+
+`sigma_cr` is the ideal elastic local compression-buckling stress, kept
+strictly separate from material yield.
+
+### Shear buckling
+
+For an **internal** plate only, using the classical simply-supported-plate
+relation (symmetric in which side is "length" vs. "width"):
+
+```
+ratio = max(a/b, b/a)
+k_s   = 5.34 + 4.0/ratio^2
+
+tau_cr = k_s * pi^2*E / [12*(1-nu^2)] * (t/b)^2
+```
+
+For an **outstanding** plate, no defensible classical shear-buckling
+coefficient is implemented -- shear buckling of a one-edge-free flange is
+a materially different problem from the simply-supported case, and is not
+verified here. `shear_buckling_coefficient("outstanding", ...)` and
+`critical_shear_stress` both return `None` (**not applicable**, never
+silently reused from the internal-plate formula), and the interaction
+screen (below) is skipped for that plate -- only its compression margin
+applies.
+
+### Margins and the interaction screen
+
+```
+sigma_comp = max(-sigma_x, 0)              (Milestone 1-2 convention: negative sigma_x = compression)
+MS_comp    = sigma_cr/sigma_comp - 1       (None, trivially passing, if sigma_comp == 0)
+
+MS_shear   = tau_cr/|tau_xy| - 1           (None, trivially passing, if tau_cr is N/A or tau_xy == 0)
+
+FI              = (sigma_comp/sigma_cr)^2 + (|tau_xy|/tau_cr)^2   (only when tau_cr applies)
+MS_interaction  = 1/sqrt(FI) - 1           (None if FI is N/A or exactly 0)
+```
+
+The interaction relation is labeled an **illustrative elastic
+local-buckling interaction screen** -- it is *not* a universally
+applicable plate-buckling interaction law. The individual compression and
+shear margins remain separately visible in every result; nothing is
+blended into the interaction number silently. The governing mode
+("compression", "shear", or "interaction") is the one with the smallest
+margin among those that apply, determined by comparison, with a fixed
+(compression, shear, interaction) tie-break order.
+
+Local buckling is kept **strictly separate** from the elastic von Mises
+yield screen -- `assess_section_local_buckling` and
+`assess_builtup_strength` produce two independent margins that are never
+numerically blended; `combined_elastic_status` only reports the two
+pass/fail flags and their two minimum margins side by side, plus
+`yield_passes AND local_buckling_passes`.
+
+### Mapping I/Z/hat sections to plate elements
+
+Plate topology is mapped **explicitly** per shape -- generic inference
+from arbitrary rectangles is not attempted:
+
+- **I-section**: the web is an internal plate (width = clear web height).
+  Each flange's outstand beyond the web, `(flange_width -
+  web_thickness)/2`, is a separate outstanding plate (top and bottom kept
+  distinct, since one may be in compression while the other is in tension).
+- **Z-section**: the web is internal (width = web height). Each Z-flange
+  is a *single-sided* cantilevered arm off the web (unlike the I-flange,
+  which continues through the web on both sides), so its *full*
+  `flange_width` is one outstanding plate; top and bottom kept distinct.
+- **Hat section**: the crown is an internal plate spanning the clear
+  distance between the two webs (`crown_width - 2*wall_thickness`). Each
+  web is an internal plate (width = the clear web run, supported by the
+  crown above and the flange below). Each bottom flange is an outstanding
+  plate of width `flange_width`. Because the underlying model carries no
+  lateral (z) position, the two webs (and the two flanges) are
+  geometrically identical here, but are still reported as distinct named
+  plates (`web_left`/`web_right`, `flange_left`/`flange_right`).
+
+All plate elements from one section share the same explicit `panel_length`
+(frame/stiffener spacing) -- it is never invented inside the material or
+section objects; it is always an explicit input to the mapping.
+
+### Local stress demand extraction
+
+Local stress demand is sampled from the existing, already-verified
+built-up beam stress solution -- no new stress theory:
+
+- **Normal stress** is linear in y, so the most-compressive value within a
+  plate's y-range is always at one of its two endpoints; both are
+  evaluated and the more negative one is kept (a net-tension plate
+  correctly yields zero compression demand).
+- **Shear stress** is a smooth (piecewise-quadratic) function of y within
+  a single homogeneous component; a fixed number of evenly-spaced interior
+  sample points (inset slightly from the exact edges, which can otherwise
+  resolve to a neighboring component under the documented `b_local`
+  boundary convention) is evaluated, and the largest magnitude is taken as
+  the representative demand.
+
+## Representative local-buckling result
+
+`examples/local_plate_buckling_study.py` screens the same I/Z/hat
+geometries as the Milestone 2 trade study, with an illustrative panel
+length of 300 mm, under the Milestone 1 representative combined load:
+
+```
+section       yield margin   buckling margin     governing plate   governing mode   status
+I-section            1.269            11.158                 web      interaction    PASS
+Z-section            1.207             9.218  top_flange_outstand      compression    PASS
+Hat-section          0.648            22.869            web_left      interaction    PASS
+```
+
+All three (relatively stocky) Milestone 2 geometries remain locally stable
+under this load -- this was not tuned; the sections simply are not thin
+enough here to buckle first. The accompanying I-section sensitivity study
+(flange thickness, web thickness, panel length, and outstand width, each
+scaled 0.75x-1.5x) confirms the expected classical trends: thickness
+scaling improves margin roughly with the square of the thickness ratio;
+outstand widening reduces the flange's own compression margin; and panel
+length shifts the web's shear margin slightly via the aspect ratio, while
+leaving its compression margin unaffected. A separate thinner, wider
+flange construction in the same example (and in the test suite) is shown
+to fail local buckling while comfortably passing yield -- the key
+Milestone 2-vs-3 lesson: elastic beam-stress/yield checks alone do not
+guarantee that a bending-efficient section's thin elements are locally
+stable.
+
 ## Verification summary
 
 **Milestone 1**: 89 tests across 7 test files, covering:
@@ -344,6 +527,18 @@ tests across 5 new test files, covering:
 - built-up strength: pure-axial/pure-bending/pure-shear reductions, exact yield boundary, computed (not assumed) governing point, deterministic tie-break, component-order invariance
 - built-up mass (reusing the Milestone 1 mass function unchanged) and density scaling
 - an equal-area I-section vs. compact-rectangle comparison demonstrating higher `I_z` and higher `I_z/A` / `min(S)/A`, and first-yield moment following `min(S_top, S_bottom)`
+
+**Milestone 3** (all Milestones 1-2 tests remain unchanged and green):
+additional tests across 3 new test files, covering:
+
+- plate-element validation (width/thickness/length/boundary-condition/non-finite rejection) and aspect-ratio hand calculation
+- compression coefficient (internal = 4.0, outstanding = 0.43), shear coefficient hand calculation (including the reciprocal-equivalent case for aspect ratio < 1), and rejection of an unrecognized boundary condition
+- critical-stress hand calculations for compression and shear, t² scaling, b⁻² scaling, linear E scaling, the internal/outstanding critical-stress ratio, and Poisson-ratio sensitivity following the `1/(1-nu^2)` denominator
+- margins: zero-demand → `None`, exact boundary → margin 0 (PASS), below/above for both compression and shear, the interaction hand calculation (0.6²+0.8²=1 → margin 0), and a deterministic mode tie-break (shear vs. interaction, both reducing to the identical expression at zero compression demand)
+- I/Z/hat plate-element mapping: expected plate names/counts, I-section web and flange-outstand geometry hand calculations, Z-section's full-width (not halved) flange outstand, hat-section's clear crown width, and exact panel-length propagation
+- stress extraction: zero compression demand for a tension-only plate, correct extreme-fiber stress for the compression-side flange, moment-reversal swapping which side is in compression, web shear demand matching the existing built-up shear result, linear load scaling, and component-order independence
+- section-level assessment: an all-safe PASS, constructed compression-buckling and shear-buckling failures, a case with both compression and shear margins present, deterministic governing-plate tie-break, repeated-call determinism, yield-passes-while-buckling-fails and buckling-passes-while-yield-fails constructions, and the combined (never-blended) overall status
+- section-level sensitivity: flange/web thickness scaling, panel-length effect on shear (not compression) critical stress, and outstand-width scaling -- each verified through the full I-section factory mapping, not just the raw plate formulas
 
 Run the full suite yourself (see below) — all tests pass.
 
@@ -409,6 +604,38 @@ Milestone 2 (in addition to the above, which still apply):
 - No section optimization/search and no multiple-load-case sizing.
 - No certification claim of any kind.
 
+Milestone 3 (in addition to the above, which still apply):
+
+- Classical illustrative elastic plate coefficients only (k_c = 4.0
+  internal / 0.43 outstanding; k_s from the simply-supported-plate
+  relation) — not a sourced aerospace allowable, not edge-restraint-aware,
+  not a complete design rule.
+- No empirical crippling — this is an ideal elastic eigenvalue screen, not
+  a post-buckling ultimate-strength prediction.
+- No postbuckling behavior or effective-width iteration.
+- No plasticity.
+- Outstanding-plate shear buckling is explicitly **not implemented**
+  (reported as not-applicable) rather than reusing the internal-plate
+  formula without justification.
+- No overall Euler/beam-column buckling, skin-stringer interaction,
+  frame-ring global instability, torsional or distortional buckling, or
+  warping.
+- No fastener/joint effects, fatigue, or damage tolerance.
+- No nonlinear shell FEA.
+- No certification knockdowns or sourced aerospace allowables.
+- No multi-load-case sizing search, mass optimization, or section resizing
+  (Milestone 3 only screens the Milestone 2 geometries as given).
+- Plate topology is mapped explicitly per factory shape (I/Z/hat) — no
+  generic inference of plate topology from arbitrary user-built
+  `BuiltUpSection` objects.
+- Local stress demand is sampled at a fixed, non-adaptive set of points
+  (both endpoints for normal stress; 21 evenly-spaced interior points for
+  shear) rather than derived from a closed-form extremum search; this is
+  accurate for the linear-normal-stress / smooth-quadratic-shear fields
+  produced by this beam model, but is a numerical approximation, not an
+  exact analytical optimum.
+- No certification claim of any kind.
+
 ## Repository layout
 
 ```
@@ -429,6 +656,8 @@ src/frame_stringer/
     sections.py                # i_section / z_section / hat_section factories (Milestone 2)
     built_up_stress.py         # built-up normal stress, Q(y)/b_local(y) shear, critical points (Milestone 2)
     built_up_strength.py       # built-up strength assessment, bending yield capacity (Milestone 2)
+    plate_buckling.py          # PlateElement, compression/shear buckling, margins, interaction (Milestone 3)
+    local_buckling.py          # I/Z/hat plate mappings, stress extraction, section assessment (Milestone 3)
 
 tests/
     test_geometry.py
@@ -443,10 +672,14 @@ tests/
     test_built_up_stress.py
     test_built_up_strength.py
     test_built_up_mass_efficiency.py
+    test_plate_buckling.py
+    test_local_buckling.py
+    test_local_buckling_sensitivity.py
 
 examples/
-    frame_stringer_sanity.py     # Milestone 1 representative sanity case
-    built_up_section_trade.py    # Milestone 2 equal-area section efficiency trade
+    frame_stringer_sanity.py         # Milestone 1 representative sanity case
+    built_up_section_trade.py        # Milestone 2 equal-area section efficiency trade
+    local_plate_buckling_study.py    # Milestone 3 local-buckling screening + sensitivity study
 ```
 
 ## Installation / testing
@@ -458,6 +691,7 @@ pip install -e ".[dev]"
 pytest -q
 python examples/frame_stringer_sanity.py
 python examples/built_up_section_trade.py
+python examples/local_plate_buckling_study.py
 ```
 
 ## License status

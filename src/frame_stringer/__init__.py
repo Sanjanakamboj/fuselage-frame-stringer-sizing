@@ -34,6 +34,25 @@ The resulting stress model is still an elementary beam-section treatment;
 local plate buckling, crippling, torsion, shear-center effects, and skin
 interaction remain deferred to a later milestone.
 
+Milestone 3 scope
+------------------
+Milestone 3 adds classical elastic local-plate-buckling screens to the
+verified built-up beam sections. These checks identify the onset of ideal
+plate instability; they do not model postbuckling, crippling, effective
+width, or certification knockdowns.
+
+1. a rectangular plate-element primitive with an explicit "internal" or
+   "outstanding" boundary condition
+2. classical illustrative elastic compression- and shear-buckling
+   coefficients and critical stresses
+3. compression, shear, and an illustrative preliminary interaction margin,
+   kept strictly separate from (never blended with) the elastic von Mises
+   yield margin
+4. explicit I/Z/hat plate-element mappings (web, flange outstands, crown)
+5. local stress demand sampled from the existing verified built-up beam
+   stress solution
+6. a section-level local-buckling assessment with a governing plate/mode
+
 This is a beam-section model, NOT a shell/frame finite-element model. It uses
 elementary (Euler-Bernoulli) beam theory only.
 
@@ -80,4 +99,6 @@ __all__ = [
     "sections",
     "built_up_stress",
     "built_up_strength",
+    "plate_buckling",
+    "local_buckling",
 ]
